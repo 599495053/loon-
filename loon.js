@@ -1,69 +1,82 @@
-/* 
- * 本脚本实现固定 X-T5-Auth 的 HTTP CONNECT 隧道协议
- * 适用于南京电信等需要静态认证的场景
- */
+// 文件: backend-baidu.js
+const http = require('http');
+const backend = require('./backend'); // 假设存在对应的backend模块
 
-// 全局变量定义
-let httpStatus = -1;
+const {
+  ADDRESS,
+  PROXY,
+  DIRECT_WRITE,
+  SUCCESS,
+  HANDSHAKE,
+  DIRECT
+} = backend;
 
-// 固定认证值（直接复制 Stash 配置中的值）
-const FIXED_AUTH = "683556433";
+const ctx_uuid = backend.get_uuid;
+const ctx_proxy_type = backend.get_proxy_type;
+const ctx_address_type = backend.get_address_type;
+const ctx_address_host = backend.get_address_host;
+const ctx_address_port = backend.get_address_port;
+const ctx_write = backend.write;
+const ctx_free = backend.free;
+const ctx_debug = backend.debug;
 
-// 隧道连接成功回调
-function tunnelDidConnected() {
-    _writeHttpHeader();
-    httpStatus = 0;
+const flags = {};
+const kHttpHeaderSent = 1;
+const kHttpHeaderRecived = 2;
+
+function wa_lua_on_flags_cb(ctx) {
+  return DIRECT_WRITE;
+}
+
+function wa_lua_on_handshake_cb(ctx) {
+  const uuid = ctx_uuid(ctx);
+  if (flags[uuid] === kHttpHeaderRecived) {
     return true;
+  }
+  if (flags[uuid] !== kHttpHeaderSent) {
+    const host = ctx_address_host(ctx);
+    const port = ctx_address_port(ctx);
+    const request = [
+      `CONNECT ${host}:${port} HTTP/1.1\r\n`,
+      'Host: 153.3.236.22:443\r\n',
+      'User-Agent: Mozilla/5.0 (Linux; Android 12; RMX3300 Build/SKQ1.211019.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/97.0.4692.98 Mobile Safari/537.36 T7/13.32 SP-engine/2.70.0 baiduboxapp/13.32.0.10 (Baidu; P1 12) NABar/1.0\r\n',
+      'Proxy-Connection: Keep-Alive\r\n',
+      'X-T5-Auth: 683556433\r\n\r\n'
+    ].join('');
+    
+    ctx_write(ctx, request);
+    flags[uuid] = kHttpHeaderSent;
+  }
+  return false;
 }
 
-// 隧道 TLS 握手成功回调
-function tunnelTLSFinished() {
-    _writeHttpHeader();
-    httpStatus = 0;
-    return true;
+function wa_lua_on_read_cb(ctx, buf) {
+  ctx_debug('wa_lua_on_read_cb');
+  const uuid = ctx_uuid(ctx);
+  if (flags[uuid] === kHttpHeaderSent) {
+    flags[uuid] = kHttpHeaderRecived;
+    return [HANDSHAKE, null]; // 返回数组模拟多值返回
+  }
+  return [DIRECT, buf]; // 返回数组模拟多值返回
 }
 
-// 处理代理服务器返回的数据
-function tunnelDidRead(data) {
-    if (httpStatus === 0) {
-        // 检查 HTTP 响应状态码是否为 200
-        const statusLine = data.toString().split('\r\n')[0];
-        const statusCode = parseInt(statusLine.split(' ')[1]);
-        if (statusCode === 200) {
-            console.log('隧道建立成功');
-            httpStatus = 1;
-            $tunnel.established($session); // 启动数据转发
-            return null; // 不转发响应头到客户端
-        } else {
-            throw new Error(`隧道建立失败 [${statusCode}]`);
-        }
-    } else if (httpStatus === 1) {
-        return data; // 开始透传数据
-    }
+function wa_lua_on_write_cb(ctx, buf) {
+  ctx_debug('wa_lua_on_write_cb');
+  return [DIRECT, buf]; // 返回数组模拟多值返回
 }
 
-// 处理数据发送完成回调
-function tunnelDidWrite() {
-    if (httpStatus === -1) {
-        console.log('请求头发送完成');
-        httpStatus = 0;
-        $tunnel.readTo($session, '\r\n\r\n'); // 等待完整响应头
-        return false; // 暂停写入回调
-    }
-    return true;
+function wa_lua_on_close_cb(ctx) {
+  ctx_debug('wa_lua_on_close_cb');
+  const uuid = ctx_uuid(ctx);
+  delete flags[uuid];
+  ctx_free(ctx);
+  return SUCCESS;
 }
 
-// 构造 HTTP CONNECT 请求头
-function _writeHttpHeader() {
-    const conHost = $session.conHost;
-    const conPort = $session.conPort;
-    const header = `
-CONNECT ${conHost}:${conPort} HTTP/1.1\r\n
-Host: ${conHost}:${conPort}\r\n
-X-T5-Auth: ${FIXED_AUTH}\r\n
-Proxy-Connection: keep-alive\r\n
-User-Agent: okhttp/3.11.0 Dalvik/2.1.0 (Linux; U; Android 11; Redmi K30 5G Build/RKQ1.200826.002) baiduboxapp/11.0.5.12 (Baidu; P1 11)\r\n
-\r\n
-`;
-    $tunnel.write($session, header);
-}
+module.exports = {
+  wa_lua_on_flags_cb,
+  wa_lua_on_handshake_cb,
+  wa_lua_on_read_cb,
+  wa_lua_on_write_cb,
+  wa_lua_on_close_cb
+};
