@@ -1,26 +1,28 @@
 // loon-custom-protocol.js
 
-// 手动移植 backend 模块（根据实际情况修改）
+// 手动定义 backend 模块（根据 Loon 环境适配）
 const backend = {
-    ADDRESS: '180.101.50.208:443',
-    PROXY: 'http',
+    ADDRESS: '180.101.50.208',   // 本地代理 IP
+    PORT: 443,                  // 本地代理端口
+    PROXY: 'HTTPS',             // 代理协议（根据实际情况修改）
     RESULT: {
         SUCCESS: 0,
         HANDSHAKE: 1,
         DIRECT: 2
     },
+    // 以下方法需根据 Loon API 实现（示例为占位逻辑）
     get_uuid: () => Math.random().toString(36).substr(2), // 示例 UUID 生成器
     get_proxy_type: () => 'http',
     get_address_type: () => 'domain',
-    get_address_host: () => 'example.com',
-    get_address_bytes: () => new Uint8Array([127, 0, 0, 1]),
-    get_address_port: () => 8080,
+    get_address_host: () => backend.ADDRESS,
+    get_address_port: () => backend.PORT,
     write: (ctx, data) => ctx.write(data),
     free: (ctx) => ctx.close(),
     debug: (msg) => console.log('[DEBUG]', msg)
 };
 
 const ADDRESS = backend.ADDRESS;
+const PORT = backend.PORT;
 const PROXY = backend.PROXY;
 const DIRECT_WRITE = backend.RESULT.DIRECT_WRITE;
 
@@ -46,13 +48,13 @@ function onHandshakeCallback(ctx) {
     if (state !== kHttpHeaderSent) {
         const host = backend.get_address_host(ctx);
         const port = backend.get_address_port(ctx);
-        const userAgent = 'BaiduBox/13.32.0';
+        const userAgent = 'BaiduBox/13.32.0'; // 保持与原 Lua 版本一致
         const request = [
             `CONNECT ${host}:${port} HTTP/1.1`,
-            `Host: ${ADDRESS}:443`,
+            `Host: ${ADDRESS}:${PORT}`,
             `User-Agent: ${userAgent}`,
             `Proxy-Connection: Keep-Alive`,
-            `X-T5-Auth: 683556433`,
+            `X-T5-Auth: 683556433`, // 保持与原 Lua 版本一致
             ''
         ].join('\r\n');
 
