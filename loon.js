@@ -1,112 +1,131 @@
-/**
- * 本脚本实现HTTP代理协议，可用于Loon的自定义协议（custom类型）
- * 使用方式：
- * [Proxy]
- * customHttp = custom, cloudnproxy.baidu.com, 443, script-path=https://raw.githubusercontent.com/unexpecteds/Other/main/Proxy/loon_bd.js
- * 
- * 脚本：
- * 全局参数 $session 表示当前的一个tcp会话，一个session对象样例
- * $session = {
-     "uuid":"xxxx",//会话id
-     "type":0,
-     "conHost":"google.com",
-     "conPort":443,
-     "proxy":{
-         "name":"customHttp",
-         "host":"192.168.1.139",
-         "port":"7222",
-         "userName":"username",
-         "password":"password",
-         "encryption":"aes-128",
-         "allowInsecure":false,
-         "ceritificateHost":"",
-         "isTLS":false
-     }
- }
- *  实现5个session的生命周期方法
- *  function tunnelDidConnected(); //会话tcp连接成功回调
- *  function tunnelTLSFinished(); //会话进行tls握手成功
- *  function tunnelDidRead(data); //从代理服务器读取到数据回调
- *  function tunnelDidWrite(); //数据发送到代理服务器成功
- *  function tunnelDidClose(); //会话已关闭
- * 
- *  $tunnel对象，主要用来操作session的一些方法
- *  $tunnel.write($session, data); //想代理服务器发送数据，data可以为ArrayBuffer也可以为string
- *  $tunnel.read($session); //从代理服务器读取数据
- *  $tunnel.readTo($session, trialData); //从代理服务器读取数据，一直读到数据末尾是trialData为止
- *  $tunnel.established($session); //会话握手成功，开始进行数据转发，一般在协议握手成功后调用
- *  
- */
+// loon-baidu-proxy.js
 
-/*
- * author : 星璃
- * email  : StarColoredGlaze@outlook.com
- * channel: https://t.me/ReFantasyCity
- * time   : 2023-06-27
- * desc   : 百度直连，动态生成验证，无任何干扰
- */
+// 状态码定义
+const HTTP_STATUS_INVALID = -1;
+const HTTP_STATUS_CONNECTED = 0;
+const HTTP_STATUS_WAITRESPONSE = 1;
+const HTTP_STATUS_FORWARDING = 2;
 
-let HTTP_STATUS_INVALID = -1;
-let HTTP_STATUS_CONNECTED = 0;
-let HTTP_STATUS_WAITRESPONSE = 1;
-let HTTP_STATUS_FORWARDING = 2;
-var httpStatus = HTTP_STATUS_INVALID;
+// 会话状态存储（使用闭包实现）
+const sessionStates = new Map();
 
-function createVerify(address) {
-  let index = 0;
-  for(let i = 0; i < address.length; i++) {
-    index = (index * 1318293 & 0x7FFFFFFF) + address.charCodeAt(i);
-  }
-  if(index < 0) {
-    index = index & 0x7FFFFFFF;
-  }
-  // console.log(`Host: ${address}，X-T5-Auth: ${index}`);
-  return index;
+function createSessionState(session) {
+    return {
+        status: HTTP_STATUS_INVALID,
+        expectedTrailers: '\r\n\r\n',
+        buffer: ''
+    };
 }
 
+// 生成动态验证参数
+function generateXt5Auth(host) {
+    let hash = 0;
+    for (let i = 0; i < host.length; i++) {
+        hash = (hash * 1318293 & 0x7FFFFFFF) + host.charCodeAt(i);
+    }
+    return hash < 0 ? hash & 0x7FFFFFFF : hash;
+}
+
+// 握手完成回调
 function tunnelDidConnected() {
-  console.log($session);
-  if ($session.proxy.isTLS) {
-    //https
-  } else {
-    //http
-    _writeHttpHeader();
-    httpStatus = HTTP_STATUS_CONNECTED;
-  }
-  return true;
+    const session = $session;
+    const state = getSessionState(session);
+    
+    console.log('TCP Connected:', session.conHost, session.conPort);
+    
+    // 构造HTTP CONNECT请求头
+    const auth = generateXt5Auth(session.conHost);
+    const headers = [
+        `CONNECT ${session.conHost}:${session.conPort} HTTP/1.1`,
+        `Host: ${session.proxy.host}:${session.proxy.port}`,
+        `User-Agent: Mozilla/5.0 (Linux; Android 12; RMX3300 Build/SKQ1.211019.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/97.0.4692.98 Mobile Safari/537.36 T7/13.32 SP-engine/2.70.0 baiduboxapp/13.32.0.10 (Baidu; P1 12) NABar/1.0`,
+        `Proxy-Connection: Keep-Alive`,
+        `X-T5-Auth: ${auth}`,
+        ''
+    ].join('\r\n');
+    
+    // 发送请求头
+    $tunnel.write(session, headers);
+    
+    // 设置初始状态
+    state.status = HTTP_STATUS_CONNECTED;
+    return true;
 }
 
+// TLS握手完成回调
 function tunnelTLSFinished() {
-  _writeHttpHeader();
-  httpStatus = HTTP_STATUS_CONNECTED;
-  return true;
+    return tunnelDidConnected.call(this);
 }
 
+// 数据读取回调
 function tunnelDidRead(data) {
-  if (httpStatus == HTTP_STATUS_WAITRESPONSE) {
-    //check http response code == 200
-    //Assume success here
-    console.log('http handshake success');
-    httpStatus = HTTP_STATUS_FORWARDING;
-    $tunnel.established($session); //可以进行数据转发
-    return null; //不将读取到的数据转发到客户端
-  } else if (httpStatus == HTTP_STATUS_FORWARDING) {
-    return data;
-  }
+    const session = $session;
+    const state = getSessionState(session);
+    
+    // 缓存接收到的数据
+    state.buffer += data.toString();
+    
+    if (state.status === HTTP_STATUS_WAITRESPONSE) {
+        // 检查是否收到完整响应头
+        const response = state.buffer;
+        const headerEndIndex = response.indexOf(state.expectedTrailers);
+        
+        if (headerEndIndex !== -1) {
+            console.log('HTTP Handshake Success:', response.slice(0, headerEndIndex));
+            
+            // 切换到数据转发状态
+            state.status = HTTP_STATUS_FORWARDING;
+            $tunnel.established(session);
+            
+            // 清空缓冲区
+            state.buffer = '';
+            return null; // 不透传握手数据
+        }
+    } else if (state.status === HTTP_STATUS_FORWARDING) {
+        // 直接透传数据
+        return data;
+    }
+    
+    return null;
 }
 
+// 数据发送回调
 function tunnelDidWrite() {
-  if (httpStatus == HTTP_STATUS_CONNECTED) {
-    console.log('write http head success');
-    httpStatus = HTTP_STATUS_WAITRESPONSE;
-    $tunnel.readTo($session, '\x0D\x0A\x0D\x0A'); //读取远端数据直到出现\r\n\r\n
-    return false; //中断wirte callback
-  }
-  return true;
+    const session = $session;
+    const state = getSessionState(session);
+    
+    if (state.status === HTTP_STATUS_CONNECTED) {
+        console.log('HTTP Header Sent');
+        
+        // 开始读取直到遇到响应头结束符
+        $tunnel.readTo(session, state.expectedTrailers);
+        state.status = HTTP_STATUS_WAITRESPONSE;
+    }
+    
+    return true;
 }
 
+// 会话关闭回调
 function tunnelDidClose() {
-  return true;
+    const session = $session;
+    sessionStates.delete(session.uuid);
+    console.log('Session Closed:', session.uuid);
+    return true;
 }
 
-//Tools
+// 辅助函数：获取/创建会话状态
+function getSessionState(session) {
+    if (!sessionStates.has(session.uuid)) {
+        sessionStates.set(session.uuid, createSessionState(session));
+    }
+    return sessionStates.get(session.uuid);
+}
+
+// 注册生命周期钩子
+module.exports = {
+    tunnelDidConnected,
+    tunnelTLSFinished,
+    tunnelDidRead,
+    tunnelDidWrite,
+    tunnelDidClose
+};
