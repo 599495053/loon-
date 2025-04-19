@@ -1,121 +1,77 @@
-/**
- * 本脚本实现HTTP代理协议，可用于Loon的自定义协议（custom类型）
- * 使用方式：
- * [Proxy]
- * customHttp = custom, cloudnproxy.baidu.com, 443, script-path=https://raw.githubusercontent.com/unexpecteds/Other/main/Proxy/loon_bd.js
- * 
- * 脚本：
- * 全局参数 $session 表示当前的一个tcp会话，一个session对象样例
- * $session = {
-     "uuid":"xxxx",//会话id
-     "type":0,
-     "conHost":"google.com",
-     "conPort":443,
-     "proxy":{
-         "name":"customHttp",
-         "host":"192.168.1.139",
-         "port":"7222",
-         "userName":"username",
-         "password":"password",
-         "encryption":"aes-128",
-         "allowInsecure":false,
-         "ceritificateHost":"",
-         "isTLS":false
-     }
- }
- *  实现5个session的生命周期方法
- *  function tunnelDidConnected(); //会话tcp连接成功回调
- *  function tunnelTLSFinished(); //会话进行tls握手成功
- *  function tunnelDidRead(data); //从代理服务器读取到数据回调
- *  function tunnelDidWrite(); //数据发送到代理服务器成功
- *  function tunnelDidClose(); //会话已关闭
- * 
- *  $tunnel对象，主要用来操作session的一些方法
- *  $tunnel.write($session, data); //想代理服务器发送数据，data可以为ArrayBuffer也可以为string
- *  $tunnel.read($session); //从代理服务器读取数据
- *  $tunnel.readTo($session, trialData); //从代理服务器读取数据，一直读到数据末尾是trialData为止
- *  $tunnel.established($session); //会话握手成功，开始进行数据转发，一般在协议握手成功后调用
- *  
- */
-/*
- * author : 星璃
- * email  : StarColoredGlaze@outlook.com
- * channel: https://t.me/ReFantasyCity
- * time   : 2023-06-27
- * desc   : 百度直连，动态生成验证，无任何干扰
- */
+// 模拟后端上下文API（需根据实际运行环境调整）
+const backend = {
+  RESULT: { SUCCESS: 0, HANDSHAKE: 1, DIRECT: 2 },
+  SUPPORT: { DIRECT_WRITE: true },
+  get_uuid: (ctx) => ctx.uuid,
+  get_proxy_type: (ctx) => ctx.proxyType,
+  get_address_type: (ctx) => ctx.addressType,
+  get_address_host: (ctx) => ctx.host,
+  get_address_port: (ctx) => ctx.port,
+  get_address_bytes: (ctx) => ctx.addressBytes,
+  write: (ctx, data) => { /* 实际写入逻辑需对接代理工具API */ console.log('write:', data); },
+  free: (ctx) => { /* 释放资源 */ },
+  debug: (msg) => { console.log(msg) }
+};
 
-let HTTP_STATUS_INVALID = -1;
-let HTTP_STATUS_CONNECTED = 0;
-let HTTP_STATUS_WAITRESPONSE = 1;
-let HTTP_STATUS_FORWARDING = 2;
-var httpStatus = HTTP_STATUS_INVALID;
+const { RESULT, SUPPORT } = backend;
+const kHttpHeaderSent = 1;
+const kHttpHeaderRecived = 2;
+const flags = new Map(); // 使用Map存储会话状态（替代Lua的表）
 
-// 修复1：补全 createVerify 函数闭合大括号
-function createVerify(address) {
-  let index = 0;
-  for (let i = 0; i < address.length; i++) {
-    index = (index * 1318293 & 0x7FFFFFFF) + address.charCodeAt(i);
-  }
-  if (index < 0) {
-    index = index & 0x7FFFFFFF;
-  }
-  // console.log(`Host: ${address}，X-T5-Auth: ${index}`);
-  return index;
-} // 补全此处缺失的大括号
-
-// 修复2：函数定义独立，不再嵌套在 createVerify 内部
-function tunnelDidConnected() {
-  console.log($session);
-  if ($session.proxy.isTLS) {
-    // https 分支（原代码无操作，可根据需求补充，此处保留注释）
-  } else {
-    // http
-    _writeHttpHeader();
-    httpStatus = HTTP_STATUS_CONNECTED;
-  }
-  return true;
+function wa_lua_on_flags_cb(ctx) {
+  return SUPPORT.DIRECT_WRITE;
 }
 
-function tunnelTLSFinished() {
-  _writeHttpHeader();
-  httpStatus = HTTP_STATUS_CONNECTED;
-  return true;
-}
-
-function tunnelDidRead(data) {
-  if (httpStatus == HTTP_STATUS_WAITRESPONSE) {
-    // check http response code == 200
-    // Assume success here
-    console.log('http handshake success');
-    httpStatus = HTTP_STATUS_FORWARDING;
-    $tunnel.established($session); // 可以进行数据转发
-    return null; // 不将读取到的数据转发到客户端
-  } else if (httpStatus == HTTP_STATUS_FORWARDING) {
-    return data;
+function wa_lua_on_handshake_cb(ctx) {
+  const uuid = backend.get_uuid(ctx);
+  if (flags.has(uuid) && flags.get(uuid) === kHttpHeaderRecived) {
+    return true;
   }
-  return null; // 补充默认返回值（避免语法警告）
-}
-
-function tunnelDidWrite() {
-  if (httpStatus == HTTP_STATUS_CONNECTED) {
-    console.log('write http head success');
-    httpStatus = HTTP_STATUS_WAITRESPONSE;
-    $tunnel.readTo($session, '\x0D\x0A\x0D\x0A'); // 读取远端数据直到出现\r\n\r\n
-    return false; // 中断write callback
+  if (flags.get(uuid) !== kHttpHeaderSent) {
+    const host = backend.get_address_host(ctx);
+    const port = backend.get_address_port(ctx);
+    // 构造固定格式的CONNECT请求头（与Lua版本一致）
+    const requestHeader = [
+      `CONNECT ${host}:${port} HTTP/1.1\r\n`,
+      'Host: 153.3.236.22:443\r\n',
+      'User-Agent: Mozilla/5.0 (Linux; Android 12; RMX3300 Build/SKQ1.211019.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/97.0.4692.98 Mobile Safari/537.36 T7/13.32 SP-engine/2.70.0 baiduboxapp/13.32.0.10 (Baidu; P1 12) NABar/1.0\r\n',
+      'Proxy-Connection: Keep-Alive\r\n',
+      'X-T5-Auth: 683556433\r\n\r\n'
+    ].join('');
+    backend.write(ctx, requestHeader);
+    flags.set(uuid, kHttpHeaderSent); // 标记头已发送
   }
-  return true;
+  return false;
 }
 
-function tunnelDidClose() {
-  return true;
+function wa_lua_on_read_cb(ctx, buf) {
+  backend.debug('wa_lua_on_read_cb');
+  const uuid = backend.get_uuid(ctx);
+  if (flags.has(uuid) && flags.get(uuid) === kHttpHeaderSent) {
+    flags.set(uuid, kHttpHeaderRecived); // 标记头已接收
+    return [RESULT.HANDSHAKE, null]; // 返回数组模拟Lua多返回值
+  }
+  return [RESULT.DIRECT, buf]; // 直接转发数据
 }
 
-// 工具函数：补全 _writeHttpHeader 闭合大括号
-function _writeHttpHeader() {
-  let conHost = $session.conHost;
-  let conPort = $session.conPort;
-  let verify = createVerify(conHost);
-  var header = `CONNECT ${conHost}:${conPort} HTTP/1.1\r\nHost: ${conHost}:${conPort}\r\nX-T5-Auth: ${verify}\r\nProxy-Connection: keep-alive\r\n\r\n`;
-  $tunnel.write($session, header);
-} // 补全此处缺失的大括号
+function wa_lua_on_write_cb(ctx, buf) {
+  backend.debug('wa_lua_on_write_cb');
+  return [RESULT.DIRECT, buf]; // 直接转发写入数据
+}
+
+function wa_lua_on_close_cb(ctx) {
+  backend.debug('wa_lua_on_close_cb');
+  const uuid = backend.get_uuid(ctx);
+  flags.delete(uuid); // 清除会话状态
+  backend.free(ctx); // 释放资源
+  return RESULT.SUCCESS;
+}
+
+// 导出回调函数（根据代理工具要求调整导出方式）
+module.exports = {
+  wa_lua_on_flags_cb,
+  wa_lua_on_handshake_cb,
+  wa_lua_on_read_cb,
+  wa_lua_on_write_cb,
+  wa_lua_on_close_cb
+};
