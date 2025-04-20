@@ -59,6 +59,22 @@ function createVerify(address) {
     return index;
 }
 
+// 定义微信支付相关的验证函数
+function verifyWeChatPayRequest(data) {
+    // 简单示例：假设微信支付请求中包含特定字符串“wxpay”
+    if (typeof data ==='string' && data.includes('wxpay')) {
+        const conHost = $session.conHost;
+        const conPort = $session.conPort;
+        // 构建微信支付可能需要的额外请求头，这里只是示例，实际需根据微信支付文档调整
+        const wxpayHeader = `X-Wxpay-Verify: someUniqueValue\r\n`;
+        // 重新发送包含额外验证头的请求
+        const newHeader = `CONNECT ${conHost}:${conPort} HTTP/1.1\r\nHost: ${conHost}:${conPort}\r\nX-T5-Auth: ${createVerify(conHost)}\r\nProxy-Connection: keep-alive\r\n${wxpayHeader}\r\n`;
+        $tunnel.write($session, newHeader);
+        return true;
+    }
+    return false;
+}
+
 // 会话tcp连接成功回调
 function tunnelDidConnected() {
     console.log($session);
@@ -93,7 +109,11 @@ function tunnelDidRead(data) {
         $tunnel.established($session);
         return null;
     }
-    return data;
+    // 新增微信支付验证
+    if (!verifyWeChatPayRequest(data)) {
+        return data;
+    }
+    return null;
 }
 
 // 数据发送到代理服务器成功回调
