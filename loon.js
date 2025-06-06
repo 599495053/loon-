@@ -1,41 +1,8 @@
 /**
- * 本脚本实现HTTP代理协议，可用于Loon的自定义协议（custom类型）
+ * 百度老鼠 HTTP 代理脚本 for Loon (转自 Shadowrocket 脚本)
  * 使用方式：
  * [Proxy]
- * customHttp = custom, remoteAddress, port, script-path=https://raw.githubusercontent.com/Loon0x00/LoonExampleConfig/master/Script/http.js
- * 
- * 脚本：
- * 全局参数 $session 表示当前的一个tcp会话，一个session对象样例
- * $session = {
-     "uuid":"xxxx",//会话id
-     "type":0,
-     "conHost":"google.com",
-     "conPort":443,
-     "proxy":{
-         "name":"customHttp",
-         "host":"192.168.1.139",
-         "port":"7222",
-         "userName":"username",
-         "password":"password",
-         "encryption":"aes-128",
-         "allowInsecure":false,
-         "ceritificateHost":"",
-         "isTLS":false
-     }
- }
- *  实现5个session的生命周期方法
- *  function tunnelDidConnected(); //会话tcp连接成功回调
- *  function tunnelTLSFinished(); //会话进行tls握手成功
- *  function tunnelDidRead(data); //从代理服务器读取到数据回调
- *  function tunnelDidWrite(); //数据发送到代理服务器成功
- *  function tunnelDidClose(); //会话已关闭
- * 
- *  $tunnel对象，主要用来操作session的一些方法
- *  $tunnel.write($session, data); //想代理服务器发送数据，data可以为ArrayBuffer也可以为string
- *  $tunnel.read($session); //从代理服务器读取数据
- *  $tunnel.readTo($session, trialData); //从代理服务器读取数据，一直读到数据末尾是trialData为止
- *  $tunnel.established($session); //会话握手成功，开始进行数据转发，一般在协议握手成功后调用
- *  
+ * baiduProxy = custom, cloudnproxy.baidu.com, 443, script-path=https://yourdomain.com/BaiDu_LaoSu_Loon.js, tls=true
  */
 
 let HTTP_STATUS_INVALID = -1;
@@ -45,55 +12,56 @@ let HTTP_STATUS_FORWARDING = 2;
 var httpStatus = HTTP_STATUS_INVALID;
 
 function tunnelDidConnected() {
-  console.log($session);
   if ($session.proxy.isTLS) {
-    //https
+    // TLS: 等待握手完成
   } else {
-    //http
-    _writeHttpHeader();
+    _sendConnectHeader();
     httpStatus = HTTP_STATUS_CONNECTED;
   }
   return true;
 }
 
 function tunnelTLSFinished() {
-  _writeHttpHeader();
+  _sendConnectHeader();
   httpStatus = HTTP_STATUS_CONNECTED;
+  return true;
+}
+
+function tunnelDidWrite() {
+  if (httpStatus == HTTP_STATUS_CONNECTED) {
+    httpStatus = HTTP_STATUS_WAITRESPONSE;
+    $tunnel.readTo($session, "\x0D\x0A\x0D\x0A"); // 等待 HTTP 头返回
+    return false;
+  }
   return true;
 }
 
 function tunnelDidRead(data) {
   if (httpStatus == HTTP_STATUS_WAITRESPONSE) {
-    //check http response code == 200
-    //Assume success here
-    console.log('http handshake success');
     httpStatus = HTTP_STATUS_FORWARDING;
-    $tunnel.established($session); //可以进行数据转发
-    return null; //不将读取到的数据转发到客户端
+    $tunnel.established($session);
+    return null; // 不转发握手响应
   } else if (httpStatus == HTTP_STATUS_FORWARDING) {
     return data;
   }
-}
-
-function tunnelDidWrite() {
-  if (httpStatus == HTTP_STATUS_CONNECTED) {
-    console.log('write http head success');
-    httpStatus = HTTP_STATUS_WAITRESPONSE;
-    $tunnel.readTo($session, '\x0D\x0A\x0D\x0A'); //读取远端数据直到出现\r\n\r\n
-    return false; //中断wirte callback
-  }
-  return true;
 }
 
 function tunnelDidClose() {
   return true;
 }
 
-//Tools
-function _writeHttpHeader() {
-  let conHost = $session.conHost;
-  let conPort = $session.conPort;
+// 构造并发送 HTTP CONNECT 请求
+function _sendConnectHeader() {
+  const conHost = $session.conHost;
+  const conPort = $session.conPort;
 
-  var header = `CONNECT ${conHost}:${conPort}HTTP/1.1\r\nHost: 153.3.236.22:443\r\nConnection: keep-alive\r\nUser-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 15_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Mobile/15E148 Safari/604.1 baiduboxapp\r\nX-T5-Auth: 683556433\r\nProxy-Connection: keep-alive\r\n\r\n`;
+  const header = 
+    `CONNECT ${conHost}:${conPort} HTTP/1.1\r\n` +
+    `Host: 153.3.236.22:443\r\n` +   // 固定 Host（可能为百度边缘节点）
+    `Connection: keep-alive\r\n` +
+    `User-Agent: baiduboxapp\r\n` +  // 模拟百度 App
+    `X-T5-Auth: 683556433\r\n` +     // 特定认证头
+    `Proxy-Connection: keep-alive\r\n\r\n`;
+
   $tunnel.write($session, header);
 }
