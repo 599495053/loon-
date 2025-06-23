@@ -1,0 +1,2 @@
+#udp放行
+PROTOCOL,UDP,DIRECT
