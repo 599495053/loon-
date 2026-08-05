@@ -30,3 +30,5 @@ IP-CIDR,207.56.228.178/24
 IP-CIDR,216.144.234.247/24
 DOMAIN,test.emby.fan
 DOMAIN,goemby.entertang.work
+DOMAIN,emby.my
+DOMAIN,a.emby.my
