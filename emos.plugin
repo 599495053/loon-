@@ -12,4 +12,4 @@ NOTIFY = switch, true, tag = 发送通知, desc = 是否在签到完成后发送
 SHOW_INFO = switch, true, tag = 显示详细信息, desc = 通知中显示胡萝卜数、连续签到天数等
 
 [Script]
-cron "1 0 * * *" script-path=https://raw.githubusercontent.com/599495053/Zhangjiawen/refs/heads/main/emos-qd-loon.js, tag=EMOS 签到, argument=[ACCOUNTS={ACCOUNTS}&SIGN_CONTENT={SIGN_CONTENT}&NOTIFY={NOTIFY}&SHOW_INFO={SHOW_INFO}], timeout=120
+cron "1 0 * * *" script-path=https://raw.githubusercontent.com/599495053/Zhangjiawen/refs/heads/main/emos.loon.js, tag=EMOS 签到, argument=[ACCOUNTS={ACCOUNTS}&SIGN_CONTENT={SIGN_CONTENT}&NOTIFY={NOTIFY}&SHOW_INFO={SHOW_INFO}], timeout=120
