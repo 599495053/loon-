@@ -1,7 +1,8 @@
 #!name = 最美壁纸
 #!desc = 解锁最美壁纸会员/去广告 (Script v2 语法)
-#!author = Yu9191
+#!author = baby
 #!tag = 净化
+#!icon = https://raw.githubusercontent.com/599495053/tubiaoku/main/icon/zuimeibizhi.png
 
 [Script]
 response if ${url} ~= /^https:\/\/api\.fzxhmy\.com/i then script("https://raw.githubusercontent.com/Yu9191/Rewrite/main/zuimeibizhi.js") with tag="最美壁纸", timeout=10, requires_body=true
