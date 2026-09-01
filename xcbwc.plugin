@@ -2,7 +2,7 @@
 #!desc = 自动获取账号信息并执行小蚕霸王餐日常任务，支持动态定时、手动执行及调试开关。
 #!author = Sliverkiss
 #!homepage = https://gist.github.com/Sliverkiss/27c601d97a3f8960b212e5cac5b6c470
-#!icon = https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Gift.png
+#!icon = https://raw.githubusercontent.com/599495053/tubiaoku/main/icon/xcbwc.png
 #!system = iOS,iPadOS,macOS
 #!loon_version = 3.5.1(983)
 #!tag = 签到,任务
