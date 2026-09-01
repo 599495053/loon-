@@ -1,0 +1,25 @@
+#!name = 小蚕霸王餐
+#!desc = 自动获取账号信息并执行小蚕霸王餐日常任务，支持动态定时、手动执行及调试开关。
+#!author = Sliverkiss
+#!homepage = https://gist.github.com/Sliverkiss/27c601d97a3f8960b212e5cac5b6c470
+#!icon = https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Gift.png
+#!system = iOS,iPadOS,macOS
+#!loon_version = 3.5.1(983)
+#!tag = 签到,任务
+#!type = normal
+#!date = 2026-09-01
+
+[Argument]
+capture_enabled = switch,true,tag=自动获取账号,desc=打开小蚕霸王餐 App 后自动保存账号信息
+task_enabled = switch,true,tag=启用定时任务,desc=按下方 Cron 表达式自动执行任务
+cron_expression = input,"5 8 * * *",tag=执行时间,desc=Cron 表达式，默认每天 08:05
+timeout = input,"300",tag=超时时间,desc=脚本最长运行秒数
+debug = switch,false,tag=调试日志,desc=仅排查问题时开启
+
+[Script]
+response if ${url} ~= /^https:\/\/gw\.xiaocantech\.com\/rpc(?:[\/?]|$)/i then script("https://gist.githubusercontent.com/Sliverkiss/27c601d97a3f8960b212e5cac5b6c470/raw/xcbwc.js") with enable=${capture_enabled}, tag="小蚕霸王餐·获取账号", timeout=${timeout}, debug=${debug}, requires_body=true
+cron ${cron_expression} then script("https://gist.githubusercontent.com/Sliverkiss/27c601d97a3f8960b212e5cac5b6c470/raw/xcbwc.js") with enable=${task_enabled}, tag="小蚕霸王餐·定时任务", timeout=${timeout}, debug=${debug}
+generic then script("https://gist.githubusercontent.com/Sliverkiss/27c601d97a3f8960b212e5cac5b6c470/raw/xcbwc.js") with tag="小蚕霸王餐·立即执行", img_url="play.circle.fill", timeout=${timeout}, debug=${debug}
+
+[Mitm]
+hostname = gw.xiaocantech.com
